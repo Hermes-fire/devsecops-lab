@@ -1,0 +1,53 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run SAST (ESLint)
+        run: npx eslint .
+
+      - name: Run OWASP Dependency-Check
+        run: |
+          wget https://github.com/jeremylong/DependencyCheck/releases/download/v11.1.1/dependency-check-11.1.1-release.zip
+          unzip dependency-check-11.1.1-release.zip -d dependency-check
+          chmod +x dependency-check/dependency-check/bin/dependency-check.sh
+          dependency-check/dependency-check/bin/dependency-check.sh --project SecureApp --scan . --out dependency-check-report --nvdApiKey ${{ secrets.OWASP_API_KEY }}
+          mv dependency-check-report/dependency-check-report.html ./dependency-check-report.html
+          mkdir -p $GITHUB_WORKSPACE/artifacts
+          mv ./dependency-check-report.html $GITHUB_WORKSPACE/artifacts/
+
+      - name: Upload Dependency-Check Report as Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: dependency-check-report
+          path: artifacts/dependency-check-report.html
+
+      - name: Build Docker image
+        run: docker build -t secure-app:latest .
+
+      - name: Push to Docker Hub
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+          docker tag secure-app:latest $DOCKER_USERNAME/secure-app:latest
+          docker push $DOCKER_USERNAME/secure-app:latest
